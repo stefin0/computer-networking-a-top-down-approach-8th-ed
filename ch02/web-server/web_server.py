@@ -14,73 +14,88 @@ message.
 import socket
 import sys
 
-# Create a server socket.
-serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+SERVER_HOST = "localhost"
+SERVER_PORT = 6789
 
-# Set the SO_REUSEADDR option.
-serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+# create the server socket.
+try:
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+except socket.error as error:
+    print(f"Error creating socket: {error}")
+    sys.exit(1)
 
-# Bind the server socket.
-serverPort = 6789
-serverSocket.bind(("", serverPort))
+# bind the server socket.
+try:
+    server_socket.bind((SERVER_HOST, SERVER_PORT))
+except socket.error as error:
+    print(f"Error binding socket to port {SERVER_PORT}: {error}")
+    sys.exit(1)
 
-serverSocket.listen(1)
-print(f"Server is listening on port {serverPort}.")
+server_socket.listen(1)
+print(f"Server is listening on http://{SERVER_HOST}:{SERVER_PORT}.")
 
 while True:
-    # Establish the connection.
-    print("Ready to serve...\n")
-    # (i) Create a connection socket when contacted by a client (browser)
-    connectionSocket, addr = serverSocket.accept()
-
     try:
-        # (ii) receive the HTTP request from the connection socket
-        message = connectionSocket.recv(2048).decode()
+        # (i) create a connection socket when contacted by a client (browser)
+        connection_socket, addr = server_socket.accept()
 
-        # (iii) parse the request to determine the specific file being
-        #       requested
-        filename = message.split()[1]
+        try:
+            # (ii) receive the HTTP request from the connection socket
+            request = connection_socket.recv(2048).decode("utf-8")
 
-        # (iv) get the requested file from the server's file system
-        f = open(filename[1:])
-        entity_body = f.read()
+            # if the request is empty (e.g., client disconnected), skip
+            if not request:
+                connection_socket.close()
+                continue
 
-        # (v) create an HTTP response message consisting of the requested file
-        #     preceded by header lines
-        status_line = "HTTP/1.1 200 OK\r\n"
-        headers_list = [
-            "Connection: close",
-            f"Content-Length: {len(entity_body.encode())}",
-            "Content-Type: text/html\r\n",
-        ]
-        headers = "\r\n".join(headers_list)
-        blank_line = "\r\n"
-        outputdata = [status_line, headers, blank_line, entity_body]
+            # (iii) parse the request to determine the specific file being
+            #       requested
+            try:
+                filename = request.split()[1]
+            except IndexError:
+                print("Malformed request received.")
+                connection_socket.close()
+                continue
 
-        # (vi) send the response over the TCP connection to the requesting
-        #      browser.
-        for i in range(0, len(outputdata)):
-            connectionSocket.send(outputdata[i].encode())
+            # (iv) get the requested file from the server's file system
+            try:
+                with open(filename.lstrip("/"), "r") as file:
+                    file_content = file.read()
 
-        connectionSocket.send("\r\n".encode())
+                # (v) create an HTTP response message consisting of the
+                #     requested file preceded by header lines
+                status_line = "HTTP/1.1 200 OK\r\n"
+                headers = "Content-Type: text/html; charset=utf-8\r\n"
+                headers += f"Content-Length: {len(file_content.encode("utf-8"))}\r\n"
+                response = status_line + headers + "\r\n" + file_content
 
-        connectionSocket.close()
+            except FileNotFoundError:
+                # (vi) if a browser requests a file that is not present in the
+                #      server, the server should return a “404 Not Found”
+                #      error message.
+                print(f"File not found: {filename}")
+                status_line = "HTTP/1.1 404 Not Found\r\n"
+                headers = "Content-Type: text/html; charset=utf-8\r\n"
+                response = status_line + headers + "\r\n"
 
-    except IOError:
-        # If a browser requests a file that is not present in your server,
-        # your server should return a “404 Not Found” error message.
-        status_line = "HTTP/1.1 404 Not Found\r\n"
-        headers_list = [
-            "Connection: close",
-        ]
-        headers = "\r\n".join(headers_list)
-        outputdata = [status_line, headers]
-        for i in range(0, len(outputdata)):
-            connectionSocket.send(outputdata[i].encode())
-        connectionSocket.send("\r\n".encode())
+            # (vi) send the response over the TCP connection to the requesting
+            #      browser.
+            connection_socket.sendall(response.encode("utf-8"))
 
-        # Close client socket
-        connectionSocket.close()
+        except Exception as e:
+            print(f"Error handling request: {e}")
 
-serverSocket.close()
-sys.exit()  # Terminate the program after sending the corresponding data
+        finally:
+            connection_socket.close()
+
+    except KeyboardInterrupt:
+        print("\nServer is shutting down.")
+        break
+
+    except Exception as e:
+        print(f"An unexpected error occured in the server loop: {e}")
+        break
+
+server_socket.close()
+sys.exit()
