@@ -13,6 +13,7 @@ message.
 
 import socket
 import sys
+import time
 
 SERVER_HOST = "localhost"
 SERVER_PORT = 6789
@@ -38,6 +39,7 @@ print(f"Server is listening on http://{SERVER_HOST}:{SERVER_PORT}.")
 while True:
     try:
         # (i) create a connection socket when contacted by a client (browser)
+        time.sleep(0.05)
         connection_socket, addr = server_socket.accept()
 
         try:
